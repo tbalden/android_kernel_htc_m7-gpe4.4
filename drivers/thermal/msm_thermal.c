@@ -35,7 +35,12 @@
 
 static unsigned temp_hysteresis = 5;
 static unsigned int limit_temp_degC[N_TEMP_LIMITS] = { 65, 70, 75, 85 };
+#ifndef CONFIG_ULTRA_OC
 static unsigned int limit_freq[N_TEMP_LIMITS] = { 1728000, 1350000, 918000, 384000 };
+#endif
+#ifdef CONFIG_ULTRA_OC
+static unsigned int limit_freq[N_TEMP_LIMITS] = { 1728000, 1350000, 918000, 384000 };
+#endif
 
 module_param_array(limit_temp_degC, uint, NULL, 0644);
 module_param_array(limit_freq, uint, NULL, 0644);
