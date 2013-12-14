@@ -124,6 +124,11 @@ config BMA250_WAKE_OPTIONS
 	  If you say yes here you get Wake option support for
 	  acceleration sensors BMA250.
 
+config GPE_BUILD
+	tristate "BMA250 acceleration sensor wake options support"
+	help
+	  If you say yes here you get GPE specific sensor IOCTL
+
 config SENSORS_BMA250
 	tristate "BMA250 acceleration sensor support"
 	depends on I2C=y
