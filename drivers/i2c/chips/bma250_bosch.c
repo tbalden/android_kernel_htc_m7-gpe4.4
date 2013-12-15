@@ -1523,7 +1523,7 @@ static void flick2wake_presspwr(struct work_struct * flick2wake_presspwr_work) {
 	if (!mutex_trylock(&pwrlock))
 	    return;
 
-	vibrate(5 * 5);
+	vibrate(get_sleep_wake_vibration_time() * 5);
 
 	printk("sending event KEY_POWER 1\n");
 	input_event(flick2wake_pwrdev, EV_KEY, KEY_POWER, 1);
@@ -1665,7 +1665,7 @@ static void pick2wake_count(struct work_struct * pick2wake_count_work) {
 		}
 		msleep(3);
 	}
-	vibrate(3 * 5);
+	vibrate(get_sleep_wake_vibration_time() * 5);
 
 	printk("BMA - pick2wake_count sending event KEY_POWER 1\n");
 	input_event(flick2wake_pwrdev, EV_KEY, KEY_POWER, 1);

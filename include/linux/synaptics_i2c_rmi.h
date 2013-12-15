@@ -179,6 +179,7 @@ extern uint8_t touchscreen_is_on(void);
 #ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_SWEEP2WAKE
 /* Sweep2Wake */
 extern void sweep2wake_setdev(struct input_dev * input_device);
+extern uint8_t get_sleep_wake_vibration_time(void);
 #endif
 
 extern uint8_t getPowerKeyState(void);

@@ -256,6 +256,10 @@ int sweep2wake_buttonset(const char * button_name) {
 	return future_button;
 }
 
+extern uint8_t get_sleep_wake_vibration_time(void) {
+	return sleep_wake_vibration_time;
+}
+
 extern void sweep2wake_setdev(struct input_dev * input_device) {
         sweep2wake_pwrdev = input_device;
         return;
