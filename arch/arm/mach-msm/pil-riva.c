@@ -108,6 +108,7 @@
 #define HWIO_RIVA_PLL_MODE_OUTM(m,v) \
         out_dword_masked_ns(HWIO_RIVA_PLL_MODE_ADDR,m,v,HWIO_RIVA_PLL_MODE_IN)
 
+#define APQ8064_HW_VER_1_0   0x1
 #define APQ8064_HW_VER_2_0   0x2
 #define HW_VER_ID_VIRT      (MSM_TLMM_BASE + 0x00002054)
 
@@ -277,7 +278,7 @@ static int pil_riva_reset(struct pil_desc *pil)
 
 	
 #ifdef CONFIG_QUALCOMM_WLAN_PXO
-	if (hw_ver_id >= APQ8064_HW_VER_2_0) {
+	if (hw_ver_id >= APQ8064_HW_VER_1_0) {
 		printk("[WLAN][SSR] Wait for PLL warm-up\n");
 		
 		while(nLoopCount > 0) 
