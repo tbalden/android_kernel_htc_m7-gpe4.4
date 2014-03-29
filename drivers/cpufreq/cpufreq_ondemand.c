@@ -1244,6 +1244,8 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 			if (policy->cur < dbs_tuners_ins.sync_freq)
 				dbs_freq_increase(policy, cur_load,
 						dbs_tuners_ins.sync_freq);
+			else
+				trace_cpufreq_interactive_already (policy->cpu, cur_load, policy->cur,policy->cur);
 			return;
 		}
 
@@ -1252,6 +1254,8 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 			if (policy->cur < dbs_tuners_ins.optimal_freq)
 				dbs_freq_increase(policy, cur_load,
 						dbs_tuners_ins.optimal_freq);
+			else
+				trace_cpufreq_interactive_already (policy->cpu, cur_load, policy->cur,policy->cur);
 			return;
 		}
 	}
@@ -1412,7 +1416,7 @@ static void dbs_input_event(struct input_handle *handle, unsigned int type,
 			
 			spin_lock_irqsave(&input_boost_lock, flags);
 			input_event_boost = true;
-			input_event_boost_expired = jiffies + usecs_to_jiffies(dbs_tuners_ins.sampling_rate * 2);
+			input_event_boost_expired = jiffies + usecs_to_jiffies(dbs_tuners_ins.sampling_rate * 4);
 			spin_unlock_irqrestore(&input_boost_lock, flags);
 
 			for_each_online_cpu(i) {

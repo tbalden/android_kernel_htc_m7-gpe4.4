@@ -103,6 +103,7 @@ static void msmsdcc_dbg_createhost(struct msmsdcc_host *);
 static struct dentry *debugfs_dir;
 static struct dentry *debugfs_file;
 static struct dentry *debugfs_prealloc;
+static struct dentry *debugfs_logfile_prealloc;
 static int  msmsdcc_dbg_init(void);
 #endif
 
@@ -145,13 +146,28 @@ static const u32 tuning_block_128[] = {
 	0xFFFFBBBB, 0xFFFF77FF, 0xFF7777FF, 0xEEDDBB77
 };
 
-unsigned int prealloc_size = 0;
+static unsigned int prealloc_size = 0;
+static unsigned int logfile_prealloc_size = 1024 * 1024; 
 const int SD_detect_debounce_time = 50;
 #if SD_DEBOUNCE_DEBUG
 static ktime_t last_irq;
 ktime_t detect_wq;
 ktime_t irq_diff;
 #endif
+
+extern int emmc_perf_degr(void);
+int get_prealloc_size(void)
+{
+	if (emmc_perf_degr())
+		return prealloc_size;
+	else
+		return 0;
+}
+
+int get_logfile_prealloc_size(void)
+{
+	return logfile_prealloc_size;
+}
 
 #if IRQ_DEBUG == 1
 static char *irq_status_bits[] = { "cmdcrcfail", "datcrcfail", "cmdtimeout",
@@ -1421,10 +1437,14 @@ msmsdcc_data_err(struct msmsdcc_host *host, struct mmc_data *data,
 			       data->mrq->cmd->opcode);
 			pr_err("%s: blksz %d, blocks %d\n", __func__,
 			       data->blksz, data->blocks);
-			if(is_sd_platform(host->plat))
-				msmsdcc_print_pin_info(host);
-			data->error = -EILSEQ;
 			msmsdcc_dump_sdcc_state(host);
+			if(is_sd_platform(host->plat)) {
+				host->mmc->caps &= ~MMC_CAP_UHS_SDR104;
+				pr_err("%s: %s: disable SDR104\n",
+					mmc_hostname(host->mmc), __func__);
+				msmsdcc_print_pin_info(host);
+			}
+			data->error = -EILSEQ;
 		}
 		
 		if (host->tuning_needed && !host->tuning_in_progress)
@@ -1753,8 +1773,12 @@ static void msmsdcc_do_cmdirq(struct msmsdcc_host *host, uint32_t status)
 		
 		if (host->tuning_needed)
 			host->tuning_done = false;
-		if(is_sd_platform(host->plat))
+		if(is_sd_platform(host->plat)) {
+			host->mmc->caps &= ~MMC_CAP_UHS_SDR104;
+			pr_err("%s: %s: disable SDR104\n",
+				mmc_hostname(host->mmc), __func__);
 			msmsdcc_print_pin_info(host);
+		}
 		cmd->error = -EILSEQ;
 	}
 
@@ -3207,7 +3231,14 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	unsigned long flags;
 	unsigned int clock;
 
-
+	if (is_sd_platform(host->plat)) {
+		if (host->curr.mrq && ios->clock == 0) {
+			pr_info("%s : %s, Request in progress, stop disable clk\n",
+				mmc_hostname(host->mmc), __func__);
+			WARN_ON(1);
+			return ;
+		}
+	}
 
 	mutex_lock(&host->clk_mutex);
 	DBG(host, "ios->clock = %u\n", ios->clock);
@@ -4361,9 +4392,10 @@ msmsdcc_check_status(unsigned long data)
 					mmc_hostname(host->mmc),
 					host->oldstat, status);
 
-			if (is_sd_platform(host->plat))
+			if (is_sd_platform(host->plat)) {
+				host->mmc->redetect_cnt = 0;
 				mmc_detect_change(host->mmc, msecs_to_jiffies(SD_detect_debounce_time));
-			else
+			} else
 				mmc_detect_change(host->mmc, 0);
 		}
 		host->oldstat = status;
@@ -4378,6 +4410,9 @@ msmsdcc_platform_status_irq(int irq, void *dev_id)
 	struct msmsdcc_host *host = dev_id;
 
 	pr_debug("%s: %d\n", __func__, irq);
+	if (host->mmc->caps & (MMC_CAP_SET_XPC_330 | MMC_CAP_SET_XPC_300 |
+	    MMC_CAP_SET_XPC_180))
+		host->mmc->caps |= MMC_CAP_UHS_SDR104;
 	msmsdcc_check_status((unsigned long) host);
 	return IRQ_HANDLED;
 }
@@ -6349,15 +6384,12 @@ msmsdcc_suspend(struct device *dev)
 					wimax_disable_irq(host->mmc);
 
 			
-			if (!is_wifi_slot(host->plat) && !is_wimax_platform(host->plat)) {
-
-				pr_info("[MMC] %s: %s mmc_suspend_host\n", mmc_hostname(host->mmc), __func__);
-#else
-			
-			if (!is_wifi_slot(host->plat)) {
+			if (!is_wimax_platform(host->plat)) 
 #endif
+			{
+				pr_info("[MMC] %s: %s mmc_suspend_host\n", mmc_hostname(host->mmc), __func__);
 				rc = mmc_suspend_host(mmc);
-				if (!rc && is_mmc_platform(host->plat))
+				if (!rc && is_mmc_platform(host->plat) && !is_wifi_platform(host->plat))
 					msmsdcc_gate_clock(host);
 			}
 		}
@@ -6411,7 +6443,7 @@ msmsdcc_resume(struct device *dev)
 
 	if (mmc) {
 		if (mmc->card && mmc_card_sdio(mmc->card) &&
-				mmc_card_keep_power(mmc)) {
+				mmc_card_keep_power(mmc) && !is_wifi_platform(host->plat)) {
 			msmsdcc_ungate_clock(host);
 		}
 
@@ -6430,12 +6462,10 @@ msmsdcc_resume(struct device *dev)
 		
 #ifdef CONFIG_WIMAX
 		
-		if (!is_wifi_slot(host->plat) && !is_wimax_platform(host->plat)) {
-			pr_info("[MMC] %s: %s mmc_resume_host\n", mmc_hostname(host->mmc), __func__);
-#else
-		
-		if (!is_wifi_slot(host->plat)) {
+		if (!is_wimax_platform(host->plat))
 #endif
+		{
+			pr_info("[MMC] %s: %s mmc_resume_host\n", mmc_hostname(host->mmc), __func__);
 			mmc_resume_host(mmc);
 		}
 		
@@ -6586,9 +6616,9 @@ msmsdcc_runtime_suspend(struct device *dev)
 		
 		{
 #ifdef CONFIG_WIMAX
-			if (!is_wifi_slot(host->plat) && !is_sd_platform(host->plat) && !is_wimax_platform(host->plat)) {
+			if (!is_sd_platform(host->plat) && !is_wimax_platform(host->plat)) {
 #else
-			if (!is_wifi_slot(host->plat) && !is_sd_platform(host->plat)) {
+			if (!is_sd_platform(host->plat)) {
 #endif
 				pr_info("[MMC] %s: %s mmc_suspend_host\n", mmc_hostname(host->mmc), __func__);
 				rc = mmc_suspend_host(mmc);
@@ -6691,11 +6721,11 @@ msmsdcc_runtime_resume(struct device *dev)
 
 		
 #ifdef CONFIG_WIMAX
-		if (!is_wifi_slot(host->plat) && !is_sd_platform(host->plat) && !is_wimax_platform(host->plat)) {
+		if (!is_sd_platform(host->plat) && !is_wimax_platform(host->plat)) {
 #else
-		if (!is_wifi_slot(host->plat) && !is_sd_platform(host->plat)) {
+		if (!is_sd_platform(host->plat)) {
 #endif
-			pr_info("[MMC] %s: %s mmc_suspend_host\n", mmc_hostname(host->mmc), __func__);
+			pr_info("[MMC] %s: %s mmc_resume_host\n", mmc_hostname(host->mmc), __func__);
 			mmc_resume_host(mmc);
 		}
 		
@@ -7056,6 +7086,7 @@ static void __exit msmsdcc_exit(void)
 
 #if defined(CONFIG_DEBUG_FS)
 	debugfs_remove(debugfs_prealloc);
+	debugfs_remove(debugfs_logfile_prealloc);
 	debugfs_remove(debugfs_file);
 	debugfs_remove(debugfs_dir);
 #endif
@@ -7125,13 +7156,13 @@ static void msmsdcc_dbg_createhost(struct msmsdcc_host *host)
 }
 
 static int
-msmsdcc_prealloc_open(struct inode *inode, struct file *file)
+file_prealloc_open(struct inode *inode, struct file *file)
 {
 	file->private_data = inode->i_private;
 	return 0;
 }
 
-static ssize_t msmsdcc_prealloc_write(struct file *file, const char __user *ubuf,
+static ssize_t file_prealloc_write(struct file *file, const char __user *ubuf,
 		       size_t count, loff_t *ppos)
 {
 	sscanf(ubuf, "%u", &prealloc_size);
@@ -7140,7 +7171,7 @@ static ssize_t msmsdcc_prealloc_write(struct file *file, const char __user *ubuf
 	return count;
 }
 
-static ssize_t msmsdcc_prealloc_read(struct file *filp, char __user *ubuf,
+static ssize_t file_prealloc_read(struct file *filp, char __user *ubuf,
 				size_t count, loff_t *ppos)
 {
 	char buf[200];
@@ -7150,12 +7181,43 @@ static ssize_t msmsdcc_prealloc_read(struct file *filp, char __user *ubuf,
 	return simple_read_from_buffer(ubuf, count, ppos, buf, i);
 }
 
-static const struct file_operations msmsdcc_prealloc_ops = {
-	.open	= msmsdcc_prealloc_open,
-	.write	= msmsdcc_prealloc_write,
-	.read	= msmsdcc_prealloc_read,
+static const struct file_operations file_prealloc_ops = {
+	.open	= file_prealloc_open,
+	.write	= file_prealloc_write,
+	.read	= file_prealloc_read,
 };
 
+static int
+logfile_prealloc_open(struct inode *inode, struct file *file)
+{
+	file->private_data = inode->i_private;
+	return 0;
+}
+
+static ssize_t logfile_prealloc_write(struct file *file, const char __user *ubuf,
+		       size_t count, loff_t *ppos)
+{
+	sscanf(ubuf, "%u", &logfile_prealloc_size);
+	if (logfile_prealloc_size > 10 * 1024 * 1024)
+		logfile_prealloc_size = 10 * 1024 * 1024; 
+	return count;
+}
+
+static ssize_t logfile_prealloc_read(struct file *filp, char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	char buf[200];
+	int i;
+
+	i = sprintf(buf, "%u", logfile_prealloc_size);
+	return simple_read_from_buffer(ubuf, count, ppos, buf, i);
+}
+
+static const struct file_operations logfile_prealloc_ops = {
+	.open	= logfile_prealloc_open,
+	.write	= logfile_prealloc_write,
+	.read	= logfile_prealloc_read,
+};
 static int __init msmsdcc_dbg_init(void)
 {
 	int err;
@@ -7168,8 +7230,11 @@ static int __init msmsdcc_dbg_init(void)
 	}
 	debugfs_prealloc = debugfs_create_file("file_prealloc_size",
 			0644, 0, 0,
-			&msmsdcc_prealloc_ops);
+			&file_prealloc_ops);
 
+	debugfs_logfile_prealloc = debugfs_create_file("logfile_prealloc_size",
+			0644, 0, 0,
+			&logfile_prealloc_ops);
 	return 0;
 }
 #endif
