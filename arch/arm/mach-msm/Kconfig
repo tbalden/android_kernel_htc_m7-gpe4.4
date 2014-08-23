@@ -3056,6 +3056,12 @@ config MSM_NONSMD_PACKET_FILTER
 	  The white TCP port list is updated in attribute
 	  repying on RIL to notify modem.
 
+config MONITOR_STREAMING_PORT_SOCKET
+	bool "monitor streaming port"
+	default n
+	help
+	  Monitor if any streaming port is connected
+
 config IO_FOOTPRINT
 	bool "Trace I/O for each CPU"
 	default n

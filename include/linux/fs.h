@@ -1204,7 +1204,6 @@ struct super_block {
 	
 	int s_readonly_remount;
 
-	
 #define FLAG_ASYNC_FSYNC	0x1
 	unsigned int fsync_flags;
 };
